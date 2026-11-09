@@ -1,6 +1,6 @@
 // Offline support: load the app from the network when possible, and from the cache when not.
 // Change CACHE whenever files are added, so every device picks up the new set.
-const CACHE = 'writing-app-v3';
+const CACHE = 'writing-app-v4';
 // Big files that never change at the same address (the grammar engine). Kept once, loaded from the cache.
 const VENDOR_CACHE = 'writing-app-vendor-v1';
 const APP_FILES = [
@@ -25,9 +25,10 @@ const APP_FILES = [
 ];
 
 self.addEventListener('install', event => {
+  // 'reload' asks the network for fresh copies, so a new version never installs old files from the browser's cache.
   event.waitUntil(
     caches.open(CACHE)
-      .then(cache => cache.addAll(APP_FILES))
+      .then(cache => Promise.all(APP_FILES.map(file => cache.add(new Request(file, { cache: 'reload' })))))
       .then(() => self.skipWaiting()),
   );
 });
@@ -59,7 +60,9 @@ self.addEventListener('fetch', event => {
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     try {
-      const response = await fetch(request);
+      // 'no-cache' checks with the server every time (a quick "unchanged" answer when nothing changed),
+      // so updates show up the next time the app opens instead of after the browser's cache runs out.
+      const response = await fetch(request, { cache: 'no-cache' });
       if (response.ok) cache.put(request, response.clone());
       return response;
     } catch {

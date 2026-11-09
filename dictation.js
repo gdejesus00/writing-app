@@ -31,55 +31,93 @@ export function formatDictation(before, raw) {
   return { text: needsSpace ? ` ${text}` : text, trimBefore: 0 };
 }
 
-// Chrome on Android can send the same phrase again, or the whole sentence so far, within one
-// listening session. Typed as it comes, that would repeat words, so on Android only the new words
-// are handed over. Other browsers are left exactly as they are.
-export function newWordsOnly(previous, transcript) {
-  const text = transcript.trim();
-  const plain = text.toLowerCase();
-  if (!previous || plain.length !== text.length) return { text: transcript, plain };
-  if (plain === previous) return { text: '', plain };
-  if (plain.startsWith(`${previous} `)) return { text: text.slice(previous.length).trim(), plain };
-  return { text: transcript, plain };
+// Phones. Chrome on Android doesn't follow the usual rules: it sends the sentence again with one more
+// word each time, marks every version as final, and repeats some. Typed as they come, they pile up.
+// So on a phone, each result is treated as the engine's latest guess for the sentence in progress.
+// The guess is shown while you speak and typed once, when you pause or the sentence clearly changes.
+const QUIET_MS = 1100;   // how long a pause finishes a sentence
+const REPEAT_MS = 3000;  // the engine often re-sends a finished sentence once, a moment later
+
+const wordsOf = text => text.toLowerCase().replace(/[^\p{L}\p{N}'’\s]/gu, ' ').split(/\s+/).filter(Boolean);
+
+// True if `next` is the same sentence as `previous`, grown or corrected, and not a new sentence.
+export function guessContinues(previous, next) {
+  if (!previous) return true;
+  const before = wordsOf(previous);
+  const after = wordsOf(next);
+  if (before.length <= 2) return next.toLowerCase().startsWith(previous.toLowerCase().slice(0, 3));
+  let same = 0;
+  for (let i = 0; i < Math.min(before.length, after.length); i += 1) if (before[i] === after[i]) same += 1;
+  return same >= Math.min(before.length - 2, Math.ceil(before.length * 0.6));
 }
 
 // Returns null when this browser has no speech recognition.
-export function createDictation({ onFinal, onInterim, onStart, onStop, onError, lang = 'en-US' }) {
+export function createDictation({ onFinal, onInterim, onStart, onStop, onError, lang = 'en-US', quietMs = QUIET_MS }) {
   const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
   if (!Recognition) return null;
-  const onAndroid = /Android/i.test(navigator.userAgent);
+  const onPhone = /Android/i.test(navigator.userAgent) || Boolean(window.matchMedia?.('(pointer: coarse)').matches);
 
   let recognition = null;
   let wanted = false;
   let startedAt = 0;
   let quickEnds = 0;
-  let previousFinal = ''; // Android only: the last finished phrase of this listening session
+  // Phones only
+  let guess = '';      // the latest guess for the sentence in progress, without words already typed
+  let latest = '';     // the engine's latest full guess, as it was sent
+  let typedBase = '';  // the sentence just typed (lower case), in case the engine keeps growing it
+  let typedAt = 0;
+  let quietTimer = 0;
 
-  function deliver(transcript) {
-    if (!onAndroid) {
-      onFinal(transcript);
-      return;
+  function commitGuess(keepBase) {
+    clearTimeout(quietTimer);
+    const text = guess.trim();
+    guess = '';
+    onInterim('');
+    if (!text) return;
+    typedBase = keepBase ? latest.toLowerCase() : '';
+    typedAt = Date.now();
+    onFinal(text);
+  }
+
+  function onPhoneResult(event) {
+    const last = event.results[event.results.length - 1];
+    const raw = last?.[0]?.transcript?.trim();
+    if (!raw) return;
+    const lower = raw.toLowerCase();
+    let part = raw;
+    if (typedBase && lower.length === raw.length) {
+      if (lower.startsWith(`${typedBase} `)) part = raw.slice(typedBase.length).trim();
+      else if (lower === typedBase && Date.now() - typedAt < REPEAT_MS) return; // the sentence just typed, sent again
+      else typedBase = '';
     }
-    const { text, plain } = newWordsOnly(previousFinal, transcript);
-    previousFinal = plain;
-    if (text.trim()) onFinal(text);
+    if (guess && !guessContinues(guess, part)) commitGuess(false); // a different sentence began
+    guess = part;
+    latest = raw;
+    onInterim(part);
+    clearTimeout(quietTimer);
+    quietTimer = setTimeout(() => commitGuess(true), quietMs);
+  }
+
+  function onDesktopResult(event) {
+    let interim = '';
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const result = event.results[i];
+      if (result.isFinal) onFinal(result[0].transcript);
+      else interim += result[0].transcript;
+    }
+    onInterim(interim.trim());
   }
 
   function begin() {
     recognition = new Recognition();
-    previousFinal = '';
+    clearTimeout(quietTimer);
+    guess = '';
+    latest = '';
+    typedBase = '';
     recognition.lang = lang;
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.onresult = event => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        if (result.isFinal) deliver(result[0].transcript);
-        else interim += result[0].transcript;
-      }
-      onInterim(interim.trim());
-    };
+    recognition.onresult = onPhone ? onPhoneResult : onDesktopResult;
     recognition.onerror = event => {
       if (event.error === 'no-speech' || event.error === 'aborted') return;
       wanted = false;
@@ -88,6 +126,7 @@ export function createDictation({ onFinal, onInterim, onStart, onStop, onError, 
     // The browser ends listening after a silence. Start again while dictation is on,
     // but give up if it keeps ending right away.
     recognition.onend = () => {
+      if (onPhone) commitGuess(false);
       onInterim('');
       if (!wanted) {
         recognition = null;
@@ -129,6 +168,7 @@ export function createDictation({ onFinal, onInterim, onStart, onStop, onError, 
     stop() {
       if (!wanted) return;
       wanted = false;
+      if (onPhone) commitGuess(false); // type the sentence in progress before stopping
       try {
         recognition?.stop();
       } catch {

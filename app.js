@@ -22,6 +22,7 @@ const DRIVE_PUSH_DELAY_MS = 15_000;
 const RETURN_SYNC_GAP_MS = 20_000;
 const SILENT_RETRY_MS = 10 * 60_000;
 const CLAUDE_URL = 'https://claude.ai/new';
+const APP_VERSION = '2026-11-09 d'; // shown in Settings, so you can tell which version a device is running
 const BACKUP_KEY = 'writing-app:unsaved';
 const DEFAULT_STORY = 'My story';
 const APP_NAME = 'Writing App';
@@ -119,7 +120,9 @@ const sync = createSync({
 const dictation = createDictation({
   onFinal: insertDictated,
   onInterim: text => {
-    if (statusOwner === 'dictation') statusText.textContent = text ? `“${text}”` : 'Listening…';
+    if (statusOwner !== 'dictation') return;
+    const shown = text.length > 60 ? `…${text.slice(-60)}` : text; // the end of a long sentence is what's new
+    statusText.textContent = shown ? `“${shown}”` : 'Listening…';
   },
   onStart: () => {
     dictateButton.setAttribute('aria-pressed', 'true');
@@ -158,6 +161,7 @@ async function start() {
   if (pages.length === 0) await addPage(DEFAULT_STORY, 'Chapter 1');
   const lastId = await store.getMeta('lastPageId');
   buildLookSettings();
+  $('app-version').textContent = `Writing App, version ${APP_VERSION}. Updates arrive by themselves when you open the app with an internet connection.`;
   bindEvents();
   await openPage(pages.find(page => page.id === lastId) ?? sortedPages()[0], { focus: finePointer });
   registerServiceWorker();
@@ -944,7 +948,17 @@ function warn(message) {
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
+  const hadController = Boolean(navigator.serviceWorker.controller);
   navigator.serviceWorker.register('sw.js').catch(error => console.warn('Offline support is unavailable:', error));
+  // When a new version of the app takes over, load it right away, unless you're in the middle of something.
+  if (!hadController) return;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', async () => {
+    if (reloaded || unsaved || dictation?.active || reader.active) return;
+    reloaded = true;
+    await saveNow();
+    location.reload();
+  });
 }
 
 function storageNote() {
