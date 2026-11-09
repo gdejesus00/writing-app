@@ -31,18 +31,43 @@ export function formatDictation(before, raw) {
   return { text: needsSpace ? ` ${text}` : text, trimBefore: 0 };
 }
 
+// Chrome on Android can send the same phrase again, or the whole sentence so far, within one
+// listening session. Typed as it comes, that would repeat words, so on Android only the new words
+// are handed over. Other browsers are left exactly as they are.
+export function newWordsOnly(previous, transcript) {
+  const text = transcript.trim();
+  const plain = text.toLowerCase();
+  if (!previous || plain.length !== text.length) return { text: transcript, plain };
+  if (plain === previous) return { text: '', plain };
+  if (plain.startsWith(`${previous} `)) return { text: text.slice(previous.length).trim(), plain };
+  return { text: transcript, plain };
+}
+
 // Returns null when this browser has no speech recognition.
 export function createDictation({ onFinal, onInterim, onStart, onStop, onError, lang = 'en-US' }) {
   const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
   if (!Recognition) return null;
+  const onAndroid = /Android/i.test(navigator.userAgent);
 
   let recognition = null;
   let wanted = false;
   let startedAt = 0;
   let quickEnds = 0;
+  let previousFinal = ''; // Android only: the last finished phrase of this listening session
+
+  function deliver(transcript) {
+    if (!onAndroid) {
+      onFinal(transcript);
+      return;
+    }
+    const { text, plain } = newWordsOnly(previousFinal, transcript);
+    previousFinal = plain;
+    if (text.trim()) onFinal(text);
+  }
 
   function begin() {
     recognition = new Recognition();
+    previousFinal = '';
     recognition.lang = lang;
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -50,7 +75,7 @@ export function createDictation({ onFinal, onInterim, onStart, onStop, onError, 
       let interim = '';
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
-        if (result.isFinal) onFinal(result[0].transcript);
+        if (result.isFinal) deliver(result[0].transcript);
         else interim += result[0].transcript;
       }
       onInterim(interim.trim());
