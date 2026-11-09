@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fbfaf7">
+  <meta name="description" content="A plain-page writing app for stories.">
+  <title>Writing App</title>
+  <script>
+    // Apply the saved look before the page draws, so it never flashes the wrong theme.
+    (() => {
+      let p = {};
+      try { p = JSON.parse(localStorage.getItem('writing-app:prefs') || '{}') || {}; } catch (e) { p = {}; }
+      const dark = p.mode === 'dark' || (p.mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+      const root = document.documentElement;
+      root.dataset.theme = dark ? (p.dark || 'night') : (p.light || 'paper');
+      root.dataset.shade = dark ? 'dark' : 'light';
+      root.dataset.font = p.font || 'serif';
+      root.dataset.size = p.size || 'm';
+    })();
+  </script>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <button id="menu-button" class="menu-button" type="button" aria-label="Open menu" aria-controls="panel" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+  </button>
+
+  <div class="toolbar" role="toolbar" aria-label="Writing tools">
+    <button id="dictate-button" class="tool-button" type="button" aria-pressed="false" aria-label="Dictate" title="Dictate">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></g></svg>
+    </button>
+    <button id="read-button" class="tool-button" type="button" aria-pressed="false" aria-label="Read aloud" title="Read aloud">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></g></svg>
+    </button>
+    <button id="claude-button" class="tool-button" type="button" aria-label="Ask Claude for help" title="Ask Claude">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></g></svg>
+    </button>
+    <button id="sync-button" class="tool-button sync-button" type="button" data-state="off" aria-label="Google Drive sync" title="Google Drive">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18.5h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.1 4.75 4.75 0 0 0 7 18.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <span class="sync-dot" aria-hidden="true"></span>
+    </button>
+    <button id="theme-button" class="tool-button" type="button" aria-label="Switch to dark mode" title="Dark mode">
+      <svg class="icon-moon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      <svg class="icon-sun" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></g></svg>
+    </button>
+  </div>
+
+  <main class="page">
+    <section id="prompt-card" class="prompt-card" aria-label="What to write toward" hidden>
+      <button id="prompt-toggle" class="prompt-toggle" type="button" aria-expanded="false">
+        <span id="prompt-where" class="prompt-where"></span>
+        <span id="prompt-goal" class="prompt-goal"></span>
+      </button>
+      <div id="prompt-more" class="prompt-more" hidden>
+        <p id="prompt-text" class="prompt-text"></p>
+        <div class="prompt-actions">
+          <button id="prompt-done" type="button" class="secondary">Mark this section done</button>
+          <button id="prompt-next" type="button" class="secondary" hidden>Start the next section</button>
+        </div>
+      </div>
+    </section>
+    <div class="sheet">
+      <div id="marks" class="marks" aria-hidden="true"></div>
+    <textarea id="editor" class="editor" aria-label="Writing area" placeholder="Start writing…" spellcheck="true" autocapitalize="sentences" autocomplete="off"></textarea>
+    </div>
+  </main>
+
+  <div id="fix" class="fix" role="dialog" aria-label="Suggestion" hidden>
+    <p id="fix-label" class="fix-label"></p>
+    <p id="fix-message" class="fix-message"></p>
+    <div id="fix-suggestions" class="fix-suggestions"></div>
+    <div class="fix-actions">
+      <button id="fix-add" type="button">Add to dictionary</button>
+      <button id="fix-ignore" type="button">Ignore</button>
+    </div>
+  </div>
+
+  <div id="status" class="status" role="status" hidden>
+    <span class="status-dot" aria-hidden="true"></span>
+    <span id="status-text" class="status-text"></span>
+    <button id="status-stop" class="status-stop" type="button">Stop</button>
+  </div>
+  <div id="toast" class="toast" role="alert" hidden></div>
+
+  <div id="scrim" class="scrim"></div>
+
+  <aside id="panel" class="panel" aria-label="Menu">
+    <div id="panel-tabs" class="panel-tabs" role="tablist" aria-label="Menu sections">
+      <button id="tab-pages" class="panel-tab" type="button" role="tab" aria-selected="true" aria-controls="view-pages">Pages</button>
+      <button id="tab-plot" class="panel-tab" type="button" role="tab" aria-selected="false" aria-controls="view-plot" tabindex="-1">Plot</button>
+      <button id="tab-look" class="panel-tab" type="button" role="tab" aria-selected="false" aria-controls="view-look" tabindex="-1">Settings</button>
+    </div>
+
+    <section id="view-pages" class="panel-view" role="tabpanel" aria-labelledby="tab-pages">
+      <header class="panel-head">
+        <p id="current-name" class="current-name"></p>
+        <p id="current-info" class="current-info"></p>
+      </header>
+      <nav id="page-list" class="page-list" aria-label="Your stories and pages"></nav>
+      <div class="panel-actions">
+        <button id="new-page" type="button">New page</button>
+        <button id="new-story" type="button">New story</button>
+        <button id="rename-page" type="button">Rename</button>
+        <button id="download-page" type="button">Download .md</button>
+        <button id="delete-page" type="button" class="danger">Delete page</button>
+      </div>
+      <p id="panel-note" class="panel-note"></p>
+    </section>
+
+    <section id="view-plot" class="panel-view plot" role="tabpanel" aria-labelledby="tab-plot" hidden>
+      <header class="panel-head">
+        <p id="plot-story" class="current-name"></p>
+        <p id="plot-info" class="current-info"></p>
+      </header>
+      <div class="plot-scroll">
+        <p id="plot-premise" class="plot-premise" hidden></p>
+        <ol id="plot-list" class="plot-list"></ol>
+        <div id="plot-empty" class="plot-empty" hidden>
+          <p>No plot for this story yet. Tap <strong>Plan with Claude</strong> to plan it in the Claude app, then paste the plot Claude gives you with <strong>Paste a plot</strong>. You can also add sections yourself.</p>
+        </div>
+      </div>
+      <div class="panel-actions">
+        <button id="plot-add" type="button">Add section</button>
+        <button id="plot-claude" type="button">Plan with Claude</button>
+        <button id="plot-paste" type="button">Paste a plot</button>
+        <button id="plot-open" type="button">Open plot.md</button>
+      </div>
+    </section>
+
+    <section id="view-look" class="panel-view look" role="tabpanel" aria-labelledby="tab-look" hidden>
+      <fieldset class="setting">
+        <legend>Theme</legend>
+        <div id="theme-options" class="swatches"></div>
+        <label class="check"><input id="follow-device" type="checkbox"> Switch light and dark with my device</label>
+        <p class="hint">Pick one light and one dark theme. The sun and moon button at the top switches between them.</p>
+      </fieldset>
+
+      <fieldset class="setting">
+        <legend>Font</legend>
+        <div id="font-options" class="segmented"></div>
+      </fieldset>
+
+      <fieldset class="setting">
+        <legend>Text size</legend>
+        <div id="size-options" class="segmented"></div>
+      </fieldset>
+
+      <fieldset class="setting">
+        <legend>Spelling and grammar</legend>
+        <label class="check first"><input id="grammar-on" type="checkbox"> Underline mistakes as I write</label>
+        <p id="grammar-note" class="hint">Harper checks your writing on this device, so your words never leave it. The first time, it downloads about 20 MB, then it works offline. Tap an underlined word to see the fix. For a deeper check, use the Claude button.</p>
+        <button id="grammar-clear" class="secondary" type="button" hidden>Forget my added words</button>
+      </fieldset>
+
+      <fieldset id="drive-settings" class="setting">
+        <legend>Google Drive</legend>
+        <p id="drive-status" class="drive-status"></p>
+        <label id="client-id-label" class="field" for="client-id">Client ID (from your Google sign-in setup)</label>
+        <input id="client-id" class="select" type="text" autocomplete="off" spellcheck="false" placeholder="….apps.googleusercontent.com">
+        <div class="button-row">
+          <button id="drive-connect" class="secondary" type="button">Connect Google Drive</button>
+          <button id="drive-sync" class="secondary" type="button" hidden>Sync now</button>
+          <button id="drive-disconnect" class="secondary" type="button" hidden>Disconnect</button>
+        </div>
+        <p class="hint">Your stories go in a “Writing App” folder in your Drive, with one folder per story and one .md file per page. The app gets your latest pages when you open it or come back to it, and saves to Drive as you write and when you leave.</p>
+      </fieldset>
+
+      <fieldset class="setting">
+        <legend>Read aloud</legend>
+        <label class="field" for="voice-select">Voice</label>
+        <select id="voice-select" class="select"></select>
+        <p id="voice-note" class="hint"></p>
+        <label class="field" for="speed-input">Speed <span id="speed-value"></span></label>
+        <input id="speed-input" class="range" type="range" min="0.7" max="1.4" step="0.05">
+        <button id="voice-test" class="secondary" type="button">Test voice</button>
+        <p class="hint">Reading starts at the sentence your cursor is in, or at the top if your cursor is at the end. Select some text to hear just that part.</p>
+      </fieldset>
+
+      <fieldset class="setting">
+        <legend>Dictation</legend>
+        <p class="hint">Tap the mic and talk. Pause, then say “new paragraph”, “new line”, “period”, “comma” or “question mark” on its own to add it. Your browser turns speech into text online: Edge on your PC uses Microsoft, and Chrome on your phone uses Google.</p>
+      </fieldset>
+    </section>
+  </aside>
+
+  <dialog id="claude-dialog" class="dialog wide">
+    <form method="dialog" id="claude-form">
+      <p class="dialog-title">Ask Claude</p>
+      <p id="claude-scope" class="hint top"></p>
+      <div id="claude-options" class="claude-options" role="radiogroup" aria-label="What do you need?"></div>
+      <label class="field" for="claude-question">Add a note or question (optional)</label>
+      <textarea id="claude-question" class="dialog-input area" rows="2"></textarea>
+      <p id="claude-after" class="hint" hidden></p>
+      <div class="dialog-actions">
+        <button id="claude-cancel" type="button">Close</button>
+        <button id="claude-share" type="button" hidden>Share to Claude app</button>
+        <button id="claude-go" type="submit" class="primary">Copy and open Claude</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="section-dialog" class="dialog wide">
+    <form method="dialog" id="section-form">
+      <p id="section-heading" class="dialog-title">Section</p>
+      <label class="field" for="section-title">Title</label>
+      <input id="section-title" class="dialog-input" type="text" maxlength="120" autocomplete="off">
+      <label class="field" for="section-goal">Goal: what happens in this section</label>
+      <textarea id="section-goal" class="dialog-input area" rows="2"></textarea>
+      <label class="field" for="section-prompt">Prompt: what to write toward</label>
+      <textarea id="section-prompt" class="dialog-input area" rows="4"></textarea>
+      <label class="field" for="section-page">Page</label>
+      <input id="section-page" class="dialog-input" type="text" maxlength="120" autocomplete="off" placeholder="For example, Chapter 3">
+      <div class="dialog-actions">
+        <button id="section-delete" type="button" class="danger push">Delete section</button>
+        <button id="section-cancel" type="button">Cancel</button>
+        <button id="section-save" type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="paste-dialog" class="dialog wide">
+    <form method="dialog" id="paste-form">
+      <p class="dialog-title">Paste the plot from Claude</p>
+      <p class="hint top">This replaces the plot for “<span id="paste-story"></span>”. Your pages stay as they are.</p>
+      <textarea id="paste-input" class="dialog-input area" rows="10" spellcheck="false"></textarea>
+      <div class="dialog-actions">
+        <button id="paste-cancel" type="button">Cancel</button>
+        <button id="paste-save" type="submit" class="primary">Use this plot</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dialog" class="dialog">
+    <form method="dialog">
+      <p id="dialog-title" class="dialog-title"></p>
+      <input id="dialog-input" class="dialog-input" type="text" maxlength="120" autocomplete="off" spellcheck="false" aria-labelledby="dialog-title">
+      <div class="dialog-actions">
+        <button id="dialog-cancel" type="button">Cancel</button>
+        <button id="dialog-ok" type="submit" class="primary">OK</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
