@@ -16,6 +16,7 @@ const APP_FILES = [
   'plot.js',
   'companion.js',
   'drive.js',
+  'driveerrors.js',
   'sync.js',
   'config.js',
   'manifest.webmanifest',

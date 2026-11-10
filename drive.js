@@ -4,6 +4,7 @@
 // That works the same in an installed phone app as on the PC, and once you've approved the app,
 // a fresh one-hour pass can be fetched without a tap when the app opens.
 import { GOOGLE_CLIENT_ID } from './config.js';
+import { explainDriveError } from './driveerrors.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive';
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -194,6 +195,7 @@ async function call(path, { method = 'GET', query = {}, body, headers = {}, keep
     const error = new Error(`Google Drive said ${response.status}`);
     error.status = response.status;
     error.detail = detail.slice(0, 300);
+    error.userMessage = explainDriveError(response.status, detail);
     throw error;
   }
   return raw ? response.text() : response.json();

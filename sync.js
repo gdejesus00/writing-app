@@ -80,7 +80,7 @@ export function createSync(host) {
         else if (error instanceof drive.OfflineError) setStatus('offline');
         else {
           console.error('Sync failed', error);
-          setStatus('error', error.message);
+          setStatus('error', error.userMessage || error.message);
         }
       } finally {
         running = null;

@@ -22,7 +22,7 @@ const DRIVE_PUSH_DELAY_MS = 15_000;
 const RETURN_SYNC_GAP_MS = 20_000;
 const SILENT_RETRY_MS = 10 * 60_000;
 const CLAUDE_URL = 'https://claude.ai/new';
-const APP_VERSION = '2026-11-09 f'; // shown in Settings, so you can tell which version a device is running
+const APP_VERSION = '2026-11-09 g'; // shown in Settings, so you can tell which version a device is running
 const BACKUP_KEY = 'writing-app:unsaved';
 const DEFAULT_STORY = 'My story';
 const APP_NAME = 'Writing App';
@@ -1545,7 +1545,7 @@ function renderDriveSettings() {
   ];
   if (on && drive.email()) parts.push(`Signed in as ${drive.email()}.`);
   if (on && last) parts.push(`Last synced ${new Date(last).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.`);
-  if (on && sync.detail && syncButton.dataset.state === 'error') parts.push(`(${sync.detail})`);
+  if (on && sync.detail && syncButton.dataset.state === 'error') parts.push(/^Google Drive said \d+$/.test(sync.detail) ? `(${sync.detail})` : sync.detail);
   driveStatus.textContent = parts.join(' ');
   $('client-id-label').hidden = on || builtIn;
   clientIdInput.hidden = on || builtIn;
