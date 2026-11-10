@@ -45,6 +45,11 @@ function testApi() {
 
 const api = () => testApi() || 'https://www.googleapis.com';
 
+export const inTestMode = () => Boolean(testApi());
+
+// True when a Client ID is built into the app (config.js), so nothing has to be pasted on each device.
+export const hasBuiltInClientId = () => Boolean(GOOGLE_CLIENT_ID.trim());
+
 export function clientId() {
   return (state.clientId || GOOGLE_CLIENT_ID || '').trim();
 }
@@ -92,10 +97,15 @@ export function signIn({ silent = false } = {}) {
   const id = clientId();
   if (!id) throw new Error('Add your Client ID first.');
   const nonce = crypto.randomUUID();
-  try {
-    sessionStorage.setItem(RETURN_KEY, JSON.stringify({ nonce, silent, at: Date.now() }));
-  } catch {
-    // Without sessionStorage the answer can't be checked, so it will be refused.
+  // Kept in two places: an installed phone app can come back from Google in a fresh browser tab,
+  // which can't see sessionStorage. Without either, the answer can't be checked and is refused.
+  const marker = JSON.stringify({ nonce, silent, at: Date.now() });
+  for (const storage of [sessionStorage, localStorage]) {
+    try {
+      storage.setItem(RETURN_KEY, marker);
+    } catch {
+      // The other one may still work.
+    }
   }
   if (silent) {
     state.silentAt = Date.now();
@@ -122,11 +132,14 @@ export function finishSignIn() {
   const answer = new URLSearchParams(location.hash.slice(1));
   history.replaceState(null, '', location.pathname + location.search);
   let expected = null;
-  try {
-    expected = JSON.parse(sessionStorage.getItem(RETURN_KEY) ?? 'null');
-    sessionStorage.removeItem(RETURN_KEY);
-  } catch {
-    expected = null;
+  for (const storage of [sessionStorage, localStorage]) {
+    try {
+      const found = JSON.parse(storage.getItem(RETURN_KEY) ?? 'null');
+      storage.removeItem(RETURN_KEY);
+      if (!expected && found && Date.now() - found.at < 20 * 60_000) expected = found;
+    } catch {
+      // Try the other one.
+    }
   }
   if (!expected || answer.get('state') !== expected.nonce) return { ok: false, silent: false, error: 'mismatch' };
   if (answer.get('error')) return { ok: false, silent: expected.silent, error: answer.get('error') };

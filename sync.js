@@ -30,6 +30,16 @@ export function createSync(host) {
     host.onState(status, detail);
   }
 
+  // Said once per file, ever (remembered on this device), so a Google Doc left in a story folder isn't nagged about.
+  function notifyNative(files) {
+    const told = new Set(drive.get('toldNative') ?? []);
+    const fresh = files.filter(file => !told.has(file.id));
+    if (!fresh.length) return;
+    fresh.forEach(file => told.add(file.id));
+    drive.set('toldNative', [...told]);
+    host.notify(`Skipped ${fresh.map(file => `“${file.name}”`).join(', ')} in Google Drive: it’s a Google Doc, and only Markdown files sync. Ask Claude to save it as a .md file.`);
+  }
+
   function deletes() {
     return drive.get('deletes') ?? [];
   }
@@ -91,8 +101,12 @@ export function createSync(host) {
     for (const folder of folders) if (!knownFolders.has(lower(folder.name))) knownFolders.set(lower(folder.name), folder.id);
     const folderById = new Map(folders.map(folder => [folder.id, folder]));
     const inside = folders.length ? await drive.listChildren(folders.map(folder => folder.id)) : [];
+    // Google Docs, Sheets and shortcuts have no file contents to download, so only real files sync.
+    // A Google Doc that looks like a page (say, "plot.md") is skipped with a note, once.
+    const isNative = file => (file.mimeType ?? '').startsWith('application/vnd.google-apps.');
+    notifyNative(inside.filter(file => !drive.isFolder(file) && isNative(file) && TEXT_FILE.test(file.name)));
     const files = inside
-      .filter(file => !drive.isFolder(file) && TEXT_FILE.test(file.name))
+      .filter(file => !drive.isFolder(file) && !isNative(file) && TEXT_FILE.test(file.name))
       .map(file => ({ ...file, folderId: file.parents?.find(id => folderById.has(id)) }))
       .filter(file => file.folderId);
 

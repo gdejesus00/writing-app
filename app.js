@@ -22,7 +22,7 @@ const DRIVE_PUSH_DELAY_MS = 15_000;
 const RETURN_SYNC_GAP_MS = 20_000;
 const SILENT_RETRY_MS = 10 * 60_000;
 const CLAUDE_URL = 'https://claude.ai/new';
-const APP_VERSION = '2026-11-09 d'; // shown in Settings, so you can tell which version a device is running
+const APP_VERSION = '2026-11-09 e'; // shown in Settings, so you can tell which version a device is running
 const BACKUP_KEY = 'writing-app:unsaved';
 const DEFAULT_STORY = 'My story';
 const APP_NAME = 'Writing App';
@@ -90,6 +90,7 @@ let unsaved = false;
 let saveTimer = 0;
 let typingTimer = 0;
 let toastTimer = 0;
+let toastSerial = 0; // counts messages shown, so a general message never replaces a specific one
 let statusOwner = null; // 'dictation' or 'reading' while the status pill is showing
 let readingPage = false; // true while the voice reads the page (not the voice test)
 let lastReadChunk = null;
@@ -875,6 +876,7 @@ function hideStatus(owner) {
 }
 
 function showToast(message) {
+  toastSerial += 1;
   toast.textContent = message;
   toast.hidden = false;
   clearTimeout(toastTimer);
@@ -1535,22 +1537,40 @@ function showSyncState(state) {
 function renderDriveSettings() {
   const on = drive.connected();
   const last = drive.get('lastSync');
+  const builtIn = drive.hasBuiltInClientId();
   const parts = on ? [SYNC_TEXT[syncButton.dataset.state] ?? ''] : [
-    'Not connected. Follow “Google sign-in setup.md” in the Writing App folder on your PC to get a Client ID, paste it here, then tap Connect Google Drive. Do this once on each device.',
+    builtIn
+      ? 'Not connected yet. Tap Connect Google Drive and sign in with your Google account. Do this once on each device.'
+      : 'Not connected. Follow “Google sign-in setup.md” in the Writing App folder on your PC to get a Client ID, paste it here, then tap Connect Google Drive. Do this once on each device.',
   ];
   if (on && drive.email()) parts.push(`Signed in as ${drive.email()}.`);
   if (on && last) parts.push(`Last synced ${new Date(last).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.`);
   if (on && sync.detail && syncButton.dataset.state === 'error') parts.push(`(${sync.detail})`);
   driveStatus.textContent = parts.join(' ');
-  $('client-id-label').hidden = on;
-  clientIdInput.hidden = on;
+  $('client-id-label').hidden = on || builtIn;
+  clientIdInput.hidden = on || builtIn;
   $('drive-connect').hidden = on;
   $('drive-sync').hidden = !on;
   $('drive-disconnect').hidden = !on;
 }
 
+function clientIdProblem(id) {
+  if (/^GOCSPX-/i.test(id)) return 'That’s the client secret, not the Client ID. Don’t use it. The Client ID is the long code that ends in .apps.googleusercontent.com.';
+  if (!/^\d+-[a-z0-9_-]+\.apps\.googleusercontent\.com$/i.test(id)) return 'That doesn’t look like a Client ID. It’s a long code that ends in .apps.googleusercontent.com.';
+  return '';
+}
+
 async function connectDrive() {
-  drive.setClientId(clientIdInput.value);
+  const typed = clientIdInput.value.trim();
+  if (typed && !drive.inTestMode()) {
+    const problem = clientIdProblem(typed);
+    if (problem) {
+      showToast(problem);
+      clientIdInput.focus();
+      return;
+    }
+  }
+  if (typed) drive.setClientId(typed);
   if (!drive.clientId()) {
     showToast('Paste your Client ID first. The steps are in “Google sign-in setup.md”.');
     clientIdInput.focus();
@@ -1639,7 +1659,9 @@ async function onSyncButton() {
     await saveNow({ backup: true });
     if (drive.signIn()) return; // back after Google's sign-in page
   }
+  const messagesBefore = toastSerial;
   await runSync();
+  if (toastSerial !== messagesBefore) return; // the sync already said something more specific
   const state = syncButton.dataset.state;
   showToast(state === 'error' ? `${SYNC_TEXT.error} ${sync.detail}` : SYNC_TEXT[state]);
 }
